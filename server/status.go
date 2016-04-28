@@ -111,11 +111,16 @@ func inconsistentBatch() *client.Batch {
 	return b
 }
 
+type metricMarshaler interface {
+	json.Marshaler
+	PrintAsText(io.Writer)
+}
+
 // A statusServer provides a RESTful status API.
 type statusServer struct {
 	db           *client.DB
 	gossip       *gossip.Gossip
-	metricSource json.Marshaler
+	metricSource metricMarshaler
 	router       *httprouter.Router
 	ctx          *Context
 	proxyClient  *http.Client
@@ -126,7 +131,7 @@ type statusServer struct {
 func newStatusServer(
 	db *client.DB,
 	gossip *gossip.Gossip,
-	metricSource json.Marshaler,
+	metricSource metricMarshaler,
 	ctx *Context,
 	stores *storage.Stores,
 ) *statusServer {
@@ -593,7 +598,15 @@ func (s *statusServer) handleMetrics(w http.ResponseWriter, r *http.Request, ps 
 		s.proxyRequest(nodeID, w, r)
 		return
 	}
-	respondAsJSON(w, r, s.metricSource)
+
+	// TODO(marc): this is a little strict. Maybe we should return an error with the list
+	// of supported format if we don't have a match.
+	if r.URL.Query().Get("format") != "text" {
+		respondAsJSON(w, r, s.metricSource)
+	} else {
+		w.Header().Set(util.ContentTypeHeader, util.PlaintextContentType)
+		s.metricSource.PrintAsText(w)
+	}
 }
 
 type rangeInfo struct {
